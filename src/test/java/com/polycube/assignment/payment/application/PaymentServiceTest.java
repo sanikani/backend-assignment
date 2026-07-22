@@ -8,17 +8,23 @@ import static org.mockito.Mockito.when;
 import com.polycube.assignment.common.error.BusinessException;
 import com.polycube.assignment.common.error.ErrorCode;
 import com.polycube.assignment.common.money.Money;
-import com.polycube.assignment.discount.domain.GradeDiscountPolicyProvider;
-import com.polycube.assignment.discount.domain.NormalDiscountPolicy;
-import com.polycube.assignment.discount.domain.VipFixedDiscountPolicy;
-import com.polycube.assignment.discount.domain.VvipRateDiscountPolicy;
+import com.polycube.assignment.discount.domain.DiscountCalculatorProvider;
+import com.polycube.assignment.discount.domain.DiscountSource;
+import com.polycube.assignment.discount.domain.DiscountType;
+import com.polycube.assignment.discount.domain.FixedDiscountCalculator;
+import com.polycube.assignment.discount.domain.GradeDiscountPolicy;
+import com.polycube.assignment.discount.domain.NoDiscountCalculator;
+import com.polycube.assignment.discount.domain.RateDiscountCalculator;
+import com.polycube.assignment.discount.infra.GradeDiscountPolicyRepository;
 import com.polycube.assignment.member.domain.Member;
 import com.polycube.assignment.member.domain.MemberGrade;
 import com.polycube.assignment.order.domain.Order;
 import com.polycube.assignment.order.infra.OrderRepository;
 import com.polycube.assignment.payment.domain.Payment;
+import com.polycube.assignment.payment.domain.PaymentDiscountSnapshot;
 import com.polycube.assignment.payment.domain.PaymentMethod;
 import com.polycube.assignment.payment.infra.PaymentRepository;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -42,21 +48,25 @@ class PaymentServiceTest {
     @Mock
     private OrderRepository orderRepository;
 
+    @Mock
+    private GradeDiscountPolicyRepository gradeDiscountPolicyRepository;
+
     private PaymentService paymentService;
 
     @BeforeEach
     void setUp() {
-        GradeDiscountPolicyProvider policyProvider = new GradeDiscountPolicyProvider(List.of(
-                new NormalDiscountPolicy(),
-                new VipFixedDiscountPolicy(),
-                new VvipRateDiscountPolicy()
+        DiscountCalculatorProvider calculatorProvider = new DiscountCalculatorProvider(List.of(
+                new NoDiscountCalculator(),
+                new FixedDiscountCalculator(),
+                new RateDiscountCalculator()
         ));
 
         Clock fixedClock = Clock.fixed(PAID_AT, ZoneOffset.UTC);
         paymentService = new PaymentService(
                 paymentRepository,
                 orderRepository,
-                policyProvider,
+                gradeDiscountPolicyRepository,
+                calculatorProvider,
                 fixedClock
         );
     }
@@ -71,6 +81,8 @@ class PaymentServiceTest {
         );
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
         when(paymentRepository.existsByOrderId(1L)).thenReturn(false);
+        when(gradeDiscountPolicyRepository.findByMemberGradeAndActiveTrue(MemberGrade.VIP))
+                .thenReturn(Optional.of(vipPolicy()));
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         Payment payment = paymentService.pay(1L, PaymentMethod.CARD);
@@ -82,6 +94,35 @@ class PaymentServiceTest {
         assertThat(payment.getFinalAmount()).isEqualTo(Money.of(9_000));
         assertThat(payment.getPaymentMethod()).isEqualTo(PaymentMethod.CARD);
         assertThat(payment.getPaidAt()).isEqualTo(PAID_AT);
+        assertThat(payment.getDiscountSnapshots()).hasSize(1);
+        assertThat(payment.getDiscountSnapshots().get(0).getSource())
+                .isEqualTo(DiscountSource.GRADE);
+    }
+
+    @Test
+    @DisplayName("포인트 결제는 등급 할인 후 5% 할인을 추가 적용한다")
+    void appliesPointDiscountAfterGradeDiscount() {
+        Order order = Order.create(
+                "keyboard",
+                Money.of(10_000),
+                Member.create(MemberGrade.VIP)
+        );
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(paymentRepository.existsByOrderId(1L)).thenReturn(false);
+        when(gradeDiscountPolicyRepository.findByMemberGradeAndActiveTrue(MemberGrade.VIP))
+                .thenReturn(Optional.of(vipPolicy()));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment payment = paymentService.pay(1L, PaymentMethod.POINT);
+
+        List<PaymentDiscountSnapshot> snapshots = payment.getDiscountSnapshots();
+        assertThat(snapshots).hasSize(2);
+        assertThat(snapshots.get(0).getSource()).isEqualTo(DiscountSource.GRADE);
+        assertThat(snapshots.get(0).getFinalAmount()).isEqualTo(Money.of(9_000));
+        assertThat(snapshots.get(1).getSource()).isEqualTo(DiscountSource.PAYMENT_METHOD);
+        assertThat(snapshots.get(1).getBaseAmount()).isEqualTo(Money.of(9_000));
+        assertThat(payment.getFinalAmount()).isEqualTo(Money.of(8_550));
     }
 
     @Test
@@ -110,5 +151,14 @@ class PaymentServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.errorCode())
                                 .isEqualTo(ErrorCode.ORDER_ALREADY_PAID));
+    }
+
+    private GradeDiscountPolicy vipPolicy() {
+        return GradeDiscountPolicy.create(
+                "VIP_FIXED",
+                MemberGrade.VIP,
+                DiscountType.FIXED,
+                new BigDecimal("1000")
+        );
     }
 }

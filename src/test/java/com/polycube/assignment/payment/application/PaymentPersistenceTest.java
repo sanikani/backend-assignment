@@ -9,6 +9,7 @@ import com.polycube.assignment.discount.domain.DiscountSource;
 import com.polycube.assignment.discount.domain.DiscountType;
 import com.polycube.assignment.discount.domain.GradeDiscountPolicy;
 import com.polycube.assignment.discount.domain.PointPaymentDiscountPolicy;
+import com.polycube.assignment.discount.infra.GradeDiscountPolicyRepository;
 import com.polycube.assignment.member.domain.Member;
 import com.polycube.assignment.member.domain.MemberGrade;
 import com.polycube.assignment.member.infra.MemberRepository;
@@ -51,6 +52,9 @@ class PaymentPersistenceTest {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private GradeDiscountPolicyRepository gradeDiscountPolicyRepository;
+
+    @Autowired
     private PaymentService paymentService;
 
     @Autowired
@@ -61,6 +65,12 @@ class PaymentPersistenceTest {
     void persistsCompletedPayment() {
         Member member = memberRepository.save(Member.create(MemberGrade.VIP));
         Order order = orderRepository.save(Order.create("keyboard", Money.of(10_000), member));
+        gradeDiscountPolicyRepository.save(GradeDiscountPolicy.create(
+                "VIP_FIXED",
+                MemberGrade.VIP,
+                DiscountType.FIXED,
+                new BigDecimal("1000")
+        ));
 
         Payment saved = paymentService.pay(order.getId(), PaymentMethod.POINT);
         paymentRepository.flush();
@@ -70,11 +80,16 @@ class PaymentPersistenceTest {
         assertThat(found.getOrderId()).isEqualTo(order.getId());
         assertThat(found.getProductName()).isEqualTo("keyboard");
         assertThat(found.getOriginalAmount()).isEqualTo(Money.of(10_000));
-        assertThat(found.getDiscountAmount()).isEqualTo(Money.of(1_000));
-        assertThat(found.getFinalAmount()).isEqualTo(Money.of(9_000));
+        assertThat(found.getDiscountAmount()).isEqualTo(Money.of(1_450));
+        assertThat(found.getFinalAmount()).isEqualTo(Money.of(8_550));
         assertThat(found.getMemberGrade()).isEqualTo(MemberGrade.VIP);
         assertThat(found.getPaymentMethod()).isEqualTo(PaymentMethod.POINT);
         assertThat(found.getPaidAt()).isEqualTo(PAID_AT);
+
+        List<PaymentDiscountSnapshot> snapshots = found.getDiscountSnapshots();
+        assertThat(snapshots).hasSize(2);
+        assertThat(snapshots.get(0).getSource()).isEqualTo(DiscountSource.GRADE);
+        assertThat(snapshots.get(1).getSource()).isEqualTo(DiscountSource.PAYMENT_METHOD);
     }
 
     @Test
