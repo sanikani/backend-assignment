@@ -43,7 +43,7 @@ public class GradeDiscountPolicy {
     @Column(nullable = false)
     private DiscountType discountType;
 
-    @Column(nullable = false, precision = 19, scale = 4)
+    @Column(nullable = false, precision = 23, scale = 4)
     private BigDecimal discountValue;
 
     @Column(nullable = false)
