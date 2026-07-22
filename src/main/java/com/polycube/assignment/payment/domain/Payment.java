@@ -87,18 +87,6 @@ public class Payment {
     public static Payment complete(
             Long orderId,
             Order order,
-            DiscountResult discountResult,
-            PaymentMethod paymentMethod,
-            Instant paidAt
-    ) {
-        Objects.requireNonNull(order, "주문은 필수입니다.");
-        Objects.requireNonNull(discountResult, "할인 결과는 필수입니다.");
-        return new Payment(orderId, order, discountResult, paymentMethod, paidAt);
-    }
-
-    public static Payment complete(
-            Long orderId,
-            Order order,
             List<AppliedDiscount> appliedDiscounts,
             PaymentMethod paymentMethod,
             Instant paidAt
