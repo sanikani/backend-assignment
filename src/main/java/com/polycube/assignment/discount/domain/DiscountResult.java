@@ -16,7 +16,7 @@ public final class DiscountResult {
         this.originalAmount = Objects.requireNonNull(originalAmount, "주문 원가는 필수입니다");
         Objects.requireNonNull(requestedDiscountAmount, "할인 금액은 필수입니다");
         this.finalAmount = originalAmount.subtract(requestedDiscountAmount);
-        this.discountAmount = Money.of(originalAmount.getValue() - finalAmount.getValue());
+        this.discountAmount = originalAmount.subtract(finalAmount);
     }
 
     public static DiscountResult of(Money originalAmount, Money discountAmount) {
